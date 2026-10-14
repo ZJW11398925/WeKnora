@@ -1,21 +1,55 @@
 package types
 
 import (
+	"embed"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/yanyiwu/gojieba"
 )
 
-// Jieba is a global instance of Chinese text segmentation tool
-var Jieba *gojieba.Jieba = newJieba()
+//go:embed dict/*.utf8
+var jiebaDictFS embed.FS
+
+// Jieba is the global Chinese segmentation instance, initialized lazily by
+// GetJieba. The previous eager package-level init crashed the Windows desktop
+// build: wails binding generation runs package init from an unexpected working
+// directory, gojieba's default ./dict paths are missing, and the C++ exception
+// raised across the cgo boundary aborts the process. GetJieba extracts the
+// embedded dictionaries to a local cache directory and constructs Jieba with
+// absolute paths, which is safe in any working directory.
+var (
+	jiebaOnce sync.Once
+	Jieba     *gojieba.Jieba
+)
+
+// GetJieba returns the lazily initialized global Jieba instance.
+func GetJieba() *gojieba.Jieba {
+	jiebaOnce.Do(func() {
+		Jieba = newJieba()
+	})
+	return Jieba
+}
+
+var jiebaDictFiles = []string{
+	"jieba.dict.utf8",
+	"hmm_model.utf8",
+	"user.dict.utf8",
+	"idf.utf8",
+	"stop_words.utf8",
+}
 
 func newJieba() *gojieba.Jieba {
 	dictDir := os.Getenv("JIEBA_DICT_DIR")
 	if dictDir == "" {
-		return gojieba.NewJieba()
+		dictDir = extractEmbeddedDicts()
+		if dictDir == "" {
+			// Last resort: default behavior (requires ./dict in CWD).
+			return gojieba.NewJieba()
+		}
 	}
 
 	return gojieba.NewJieba(
@@ -27,6 +61,28 @@ func newJieba() *gojieba.Jieba {
 	)
 }
 
+// extractEmbeddedDicts materializes the embedded dictionaries under the
+// system temp directory and returns that directory.
+func extractEmbeddedDicts() string {
+	cacheDir := filepath.Join(os.TempDir(), "weknora-jieba-dict")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return ""
+	}
+	for _, name := range jiebaDictFiles {
+		dst := filepath.Join(cacheDir, name)
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		data, err := jiebaDictFS.ReadFile("dict/" + name)
+		if err != nil {
+			return ""
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			return ""
+		}
+	}
+	return cacheDir
+}
 // EvaluationStatue represents the status of an evaluation task
 type EvaluationStatue int
 
