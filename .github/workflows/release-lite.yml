@@ -1,4 +1,4 @@
-﻿name: Release Lite Binaries
+name: Release Lite Binaries
 
 on:
   # push:
@@ -191,6 +191,17 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install nsis -y
 
+      - name: Install SQLite headers (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$HOME/sqlite3" && cd "$HOME/sqlite3"
+          curl -sL -o sq.zip https://www.sqlite.org/2025/sqlite-amalgamation-3490100.zip
+          unzip -q -o sq.zip
+          mv sqlite-amalgamation-*/* .
+          rm -rf sqlite-amalgamation-* sq.zip
+          test -f sqlite3.h && echo "sqlite3.h ready"
+
       - name: Resolve version
         id: ver
         shell: bash
@@ -207,7 +218,7 @@ jobs:
         shell: bash
         run: |
           export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
-          export CGO_CFLAGS="-Wno-deprecated-declarations"
+          export CGO_CFLAGS="-Wno-deprecated-declarations -I$HOME/sqlite3"
           cd cmd/desktop
           go build -p 1 -buildvcs=false -tags "desktop,sqlite_fts5,production" -o _prebuild_tmp.exe . || true
           rm -f _prebuild_tmp.exe
@@ -219,7 +230,7 @@ jobs:
           export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
           eval "$(./scripts/get_version.sh env)"
           LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
-          export CGO_CFLAGS="-Wno-deprecated-declarations"
+          export CGO_CFLAGS="-Wno-deprecated-declarations -I$HOME/sqlite3"
 
           BUILD_TAGS="sqlite_fts5"
           NSIS_FLAG=""
