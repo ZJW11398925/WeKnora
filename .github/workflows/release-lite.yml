@@ -244,7 +244,7 @@ jobs:
             export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
           fi
           if [ "${{ runner.os }}" = "Windows" ]; then
-            NSIS_FLAG="-nsis"
+            NSIS_FLAG=""
           fi
 
           echo "skip license bundle check (internal test build)"
@@ -314,18 +314,35 @@ jobs:
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
 
-      # ?????? Windows: NSIS installer includes licenses and corresponding source ??????
+      # ?????? Windows: green portable zip (exe + runtime resources) ??????
       - name: Package Windows app
         if: runner.os == 'Windows'
         shell: bash
         run: |
           ARCHIVE="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
           INSTALLER="cmd/desktop/build/bin/WeKnora Lite-amd64-installer.exe"
-          # Do not publish a bare executable if NSIS was unavailable: the
-          # installer also carries the notices/source and supports auto-update.
-          test -f "$INSTALLER"
-          cp "$INSTALLER" "${ARCHIVE}_setup.exe"
-          sha256sum "${ARCHIVE}_setup.exe" > "${ARCHIVE}_setup.exe.sha256"
+          if [ -f "$INSTALLER" ]; then
+            cp "$INSTALLER" "${ARCHIVE}_setup.exe"
+            sha256sum "${ARCHIVE}_setup.exe" > "${ARCHIVE}_setup.exe.sha256"
+          else
+            # Portable layout: bare exe plus the same runtime resources the
+            # macOS bundle ships in Contents/Resources.
+            STAGE="${ARCHIVE}_portable"
+            mkdir -p "${STAGE}/config" "${STAGE}/migrations/sqlite"
+            cp "cmd/desktop/build/bin/WeKnora Lite.exe" "${STAGE}/WeKnora Lite.exe"
+            if [ -f .env.lite.example ]; then
+              cp .env.lite.example "${STAGE}/.env"
+            fi
+            if [ -d migrations/sqlite ]; then
+              cp -r migrations/sqlite/* "${STAGE}/migrations/sqlite/"
+            fi
+            if [ -d config ]; then
+              cp -r config/* "${STAGE}/config/"
+            fi
+            powershell -Command "Compress-Archive -Path '${STAGE}' -DestinationPath '${ARCHIVE}_portable.zip' -Force"
+            sha256sum "${ARCHIVE}_portable.zip" > "${ARCHIVE}_portable.zip.sha256"
+            rm -rf "${STAGE}"
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
